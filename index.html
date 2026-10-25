@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Command</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background: #ffffff;
+      color: #24292f;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 16px;
+      overflow: hidden;
+      user-select: none;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #0969da;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #0969da;
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+    .pulse-dot.error {
+      background: #cf222e;
+      animation: none;
+    }
+    .pulse-dot.success {
+      background: #1a7f37;
+      animation: none;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.7; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.9); opacity: 0.7; }
+    }
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: #57606a;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    .close-btn:hover {
+      background: #f3f4f6;
+      color: #24292f;
+    }
+    .mic-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+    .mic-button {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: 2px solid #0969da;
+      background: #ddf4ff;
+      color: #0969da;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 0 4px rgba(9, 105, 218, 0.15);
+      transition: all 0.2s ease;
+    }
+    .mic-button.listening {
+      background: #0969da;
+      color: white;
+      box-shadow: 0 0 0 8px rgba(9, 105, 218, 0.25);
+    }
+    .transcript-box {
+      flex: 1;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13.5px;
+      line-height: 1.4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #57606a;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+    .transcript-box.has-text {
+      color: #24292f;
+      font-weight: 500;
+    }
+    .transcript-box.error {
+      background: #ffebe9;
+      color: #cf222e;
+      border-color: #ff8182;
+      font-size: 12.5px;
+      text-align: left;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .btn {
+      padding: 6px 12px;
+      font-size: 12.5px;
+      font-weight: 500;
+      border-radius: 6px;
+      border: 1px solid #d0d7de;
+      background: #ffffff;
+      color: #24292f;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      background: #f3f4f6;
+    }
+    .btn-primary {
+      background: #1f883d;
+      color: white;
+      border-color: #1a7f37;
+    }
+    .btn-primary:hover {
+      background: #1a7f37;
+    }
+    .examples {
+      font-size: 11px;
+      color: #6e7781;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="status-badge">
+      <span class="pulse-dot" id="pulseDot"></span>
+      <span id="statusLabel">Listening...</span>
+    </div>
+    <button class="close-btn" onclick="cancelAndClose()" title="Close (Esc)">×</button>
+  </div>
+
+  <div class="mic-center">
+    <div class="mic-button listening" id="micBtn" onclick="toggleListening()">🎙️</div>
+  </div>
+
+  <div class="transcript-box" id="transcriptBox">
+    Say a command, e.g. "Start dishes", "Stop", "Done report"...
+  </div>
+
+  <div class="examples" id="examplesRow">
+    💡 Try: <em>"Start [task]"</em>, <em>"Stop"</em>, <em>"Done [task]"</em>, <em>"Filter work"</em>
+  </div>
+
+  <div class="actions">
+    <button class="btn" onclick="cancelAndClose()">Cancel</button>
+    <button class="btn btn-primary" id="sendBtn" onclick="sendCurrentTranscript()" style="display: none;">Send Command</button>
+  </div>
+
+  <script>
+    let recognition = null;
+    let isListening = false;
+    let finalTranscript = '';
+    let autoCloseTimer = null;
+
+    const statusLabel = document.getElementById('statusLabel');
+    const pulseDot = document.getElementById('pulseDot');
+    const micBtn = document.getElementById('micBtn');
+    const transcriptBox = document.getElementById('transcriptBox');
+    const sendBtn = document.getElementById('sendBtn');
+    const examplesRow = document.getElementById('examplesRow');
+
+    function playAudio(type) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        if (type === 'success') {
+          [523.25, 659.25, 783.99].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            const t = now + idx * 0.06;
+            osc.frequency.setValueAtTime(freq, t);
+            gain.gain.setValueAtTime(0.12, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t);
+            osc.stop(t + 0.18);
+          });
+        }
+      } catch (e) {}
+    }
+
+    function initSpeech() {
+      const SpeechClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechClass) {
+        showError('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+        return;
+      }
+
+      recognition = new SpeechClass();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 3;
+      recognition.lang = navigator.language || 'en-US';
+
+      recognition.onstart = function () {
+        isListening = true;
+        pulseDot.className = 'pulse-dot';
+        statusLabel.textContent = 'Listening...';
+        micBtn.classList.add('listening');
+      };
+
+      recognition.onresult = function (event) {
+        let interimText = '';
+        finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const res = event.results[i];
+          if (res.isFinal) {
+            finalTranscript += res[0].transcript;
+          } else {
+            interimText += res[0].transcript;
+          }
+        }
+
+        const text = (finalTranscript || interimText).trim();
+        if (text) {
+          transcriptBox.textContent = `"${text}"`;
+          transcriptBox.className = 'transcript-box has-text';
+          sendBtn.style.display = 'inline-block';
+        }
+
+        if (finalTranscript.trim()) {
+          deliverResult(finalTranscript.trim());
+        }
+      };
+
+      recognition.onerror = function (event) {
+        console.warn('Recognition error:', event.error);
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          showError('Microphone permission was denied. Please allow microphone access for this page in Chrome.');
+        } else if (event.error === 'no-speech') {
+          statusLabel.textContent = 'No speech detected';
+          pulseDot.className = 'pulse-dot error';
+          micBtn.classList.remove('listening');
+          isListening = false;
+        } else if (event.error !== 'aborted') {
+          showError('Error: ' + event.error);
+        }
+      };
+
+      recognition.onend = function () {
+        isListening = false;
+        micBtn.classList.remove('listening');
+        if (!finalTranscript.trim() && statusLabel.textContent === 'Listening...') {
+          statusLabel.textContent = 'Stopped';
+          pulseDot.className = 'pulse-dot error';
+        }
+      };
+
+      startListening();
+    }
+
+    function startListening() {
+      if (!recognition) return;
+      finalTranscript = '';
+      sendBtn.style.display = 'none';
+      transcriptBox.textContent = 'Listening... Speak now';
+      transcriptBox.className = 'transcript-box';
+      statusLabel.textContent = 'Listening...';
+      pulseDot.className = 'pulse-dot';
+      try {
+        recognition.start();
+      } catch (e) {
+        // Recognition might already be running
+      }
+    }
+
+    function stopListening() {
+      if (recognition && isListening) {
+        try { recognition.stop(); } catch (e) {}
+      }
+      isListening = false;
+      micBtn.classList.remove('listening');
+      statusLabel.textContent = 'Stopped';
+      pulseDot.className = 'pulse-dot error';
+    }
+
+    function toggleListening() {
+      if (isListening) {
+        stopListening();
+      } else {
+        startListening();
+      }
+    }
+
+    function deliverResult(text) {
+      if (!text) return;
+      stopListening();
+      statusLabel.textContent = 'Command recognized!';
+      pulseDot.className = 'pulse-dot success';
+      playAudio('success');
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({
+          type: 'VOICE_TRANSCRIPT',
+          transcript: text
+        }, '*');
+      }
+
+      transcriptBox.textContent = `✓ "${text}"`;
+      transcriptBox.className = 'transcript-box has-text';
+
+      setTimeout(function () {
+        window.close();
+      }, 450);
+    }
+
+    function sendCurrentTranscript() {
+      const text = finalTranscript || transcriptBox.textContent.replace(/^"|"$/g, '').trim();
+      if (text && text !== 'Listening... Speak now') {
+        deliverResult(text);
+      }
+    }
+
+    function cancelAndClose() {
+      stopListening();
+      window.close();
+    }
+
+    function showError(msg) {
+      isListening = false;
+      pulseDot.className = 'pulse-dot error';
+      statusLabel.textContent = 'Error';
+      micBtn.classList.remove('listening');
+      transcriptBox.textContent = msg;
+      transcriptBox.className = 'transcript-box error';
+    }
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        cancelAndClose();
+      } else if (e.key === 'Enter') {
+        sendCurrentTranscript();
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', initSpeech);
+  </script>
+</body>
+</html>
